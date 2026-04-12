@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <style>
+  @font-face {
+    font-family: 'SunflowerLocal';
+    src: url('fonts/Sunflower-Medium.ttf') format('truetype');
+  }
+
+  body {
+    margin: 0;
+    overflow: hidden;
+  }
+
+  #mainInput {
+    position: fixed;
+    top: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 85%;
+    max-width: 420px;
+    padding: 12px;
+
+    font-family: 'SunflowerLocal', sans-serif;
+    font-size: 16px;
+    text-align: center;
+
+    border: 1px solid #ccc;
+    outline: none;
+    z-index: 10;
+    background: white;
+  }
+  </style>
+</head>
+
+<body>
+
+<input id="mainInput" placeholder="텍스트 입력으로 나무가 자라납니다!" />
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+
+<script src="firebase.js"></script>
+<script src="sketch.js"></script>
+
+</body>
+</html>
