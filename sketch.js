@@ -98,16 +98,17 @@ function handleInput(val) {
     db.ref("meta").remove();
   } else {
     // meta/nextSlot을 트랜잭션으로 원자적 업데이트
+    // 트랜잭션 내부에서 slot을 +1 증가시켜야 race condition 없음
     db.ref("meta/nextSlot").transaction((currentSlot) => {
-      return ((currentSlot ?? 0) % MAX_RINGS);
+      const slot = (currentSlot ?? 0) % MAX_RINGS;
+      return (slot + 1) % MAX_RINGS; // 다음 슬롯으로 원자적 전진
     }).then((result) => {
       if (!result.committed) return;
 
-      const slotIndex = result.snapshot.val();
-      const nextSlot = (slotIndex + 1) % MAX_RINGS;
-
-      // 다음 슬롯 번호 업데이트
-      db.ref("meta/nextSlot").set(nextSlot);
+      // 트랜잭션이 저장한 값은 "다음" 슬롯이므로
+      // 현재 쓸 슬롯 = (저장된 값 - 1 + MAX_RINGS) % MAX_RINGS
+      const nextSlot = result.snapshot.val();
+      const slotIndex = (nextSlot - 1 + MAX_RINGS) % MAX_RINGS;
 
       // 해당 슬롯에 링 데이터 쓰기 (슬롯 key로 고정)
       const ringData = createRing(val, slotIndex);
@@ -181,7 +182,7 @@ function createRing(text, slotIndex) {
     b: b,
     speed: sp,
     angleOffset: random(360),
-    fontSize: random(10, 28),
+    fontSize: random(20, 56),
     spacingFactor: random(0.72, 1.45),
     wobble: random(-8, 8),
     // ringGap은 클라이언트에서 getRingGap()으로 계산하므로 저장 안 함
@@ -214,6 +215,17 @@ function drawTextCircle(ring, r) {
 
     angle += angleStep;
   }
+}
+
+// ──────────────────────────────────────────
+// 최소 줌: 7개 링 전체가 화면 안에 들어오는 수준
+// ──────────────────────────────────────────
+function getMinZoom() {
+  const outerR = getOuterRadius(); // zoom=1 기준 외곽 반지름
+  if (outerR <= 0) return 0.3;
+  // 화면 짧은 변의 절반과 비교해 딱 맞는 zoom 계산, 최소 0.15 보장
+  const fitZoom = (min(width, height) * 0.48) / outerR;
+  return max(0.15, fitZoom);
 }
 
 function updateLayout() {
@@ -266,14 +278,12 @@ function clampOffsets(instant = false) {
 // 줌: 항상 화면 중앙 기준으로만 동작
 // ──────────────────────────────────────────
 function applyZoomCenter(newZoom) {
-  zoom = newZoom;
-  // offset은 그대로 유지 (중앙 기준이므로 이동 없음)
-  // zoom 축소 시 자연스럽게 offset 복귀
-  const centerRatio = map(zoom, 0.3, 1.0, 1.0, 0.0, true);
-  if (zoom < 1.0) {
-    offsetX *= centerRatio;
-    offsetY *= centerRatio;
-  }
+  const minZoom = getMinZoom();
+  zoom = constrain(newZoom, minZoom, 6);
+  // zoom 축소 시 offset을 중앙으로 자연스럽게 복귀
+  const centerRatio = map(zoom, minZoom, 1.0, 0.0, 1.0, true);
+  offsetX *= centerRatio;
+  offsetY *= centerRatio;
   clampOffsets(false);
 }
 
@@ -288,8 +298,8 @@ function touchMoved() {
 
     if (lastTouchDist !== null) {
       let newZoom = zoom * (d / lastTouchDist);
-      newZoom = constrain(newZoom, 0.3, 6);
-      applyZoomCenter(newZoom); // 항상 중앙 기준
+      newZoom = constrain(newZoom, getMinZoom(), 6);
+      applyZoomCenter(newZoom);
     }
 
     lastTouchDist = d;
@@ -326,6 +336,6 @@ function resetView() {
 
 function mouseWheel(event) {
   let newZoom = zoom - event.delta * 0.001;
-  newZoom = constrain(newZoom, 0.3, 6);
-  applyZoomCenter(newZoom); // 항상 중앙 기준
+  newZoom = constrain(newZoom, getMinZoom(), 6);
+  applyZoomCenter(newZoom);
 }
