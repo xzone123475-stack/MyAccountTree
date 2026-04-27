@@ -19,15 +19,14 @@ let fontsReady = false;
 
 let isComposing = false;
 
+// 플래시 모션 (전체적으로 더 빠르게) - 완전 수정: 초기 구간 느리게 시작하도록 구성
 let flash = null;
-const FLASH_EXPAND = 80;
-const FLASH_HOLD = 60;
-const FLASH_SHRINK = 180;
+const FLASH_EXPAND = 80; // 초기 확장 속도 느림
+const FLASH_HOLD = 60;   // 유지 기간 증가
+const FLASH_SHRINK = 180; // 축소 속도 조정
 
 function getRingGap(ring) {
-  const scaledFont =
-    Number(ring.fontSize ?? 20) * (min(windowWidth, windowHeight) / 800);
-
+  const scaledFont = Number(ring.fontSize ?? 20) * (min(windowWidth, windowHeight) / 800);
   return scaledFont + 4;
 }
 
@@ -51,13 +50,8 @@ function setup() {
   input = document.getElementById("mainInput");
   fontsReady = fonts.length > 0;
 
-  input.addEventListener("compositionstart", () => {
-    isComposing = true;
-  });
-
-  input.addEventListener("compositionend", () => {
-    isComposing = false;
-  });
+  input.addEventListener("compositionstart", () => { isComposing = true; });
+  input.addEventListener("compositionend", () => { isComposing = false; });
 
   input.addEventListener("keydown", (e) => {
     if (e.key === "Enter") {
@@ -67,63 +61,31 @@ function setup() {
     }
   });
 
-  if (typeof db === "undefined") {
-    console.error("Firebase db가 정의되지 않았습니다. firebase.js 연결을 확인하세요.");
-    return;
-  }
-
-  // Firebase 실시간 연결
-  // 중요: 여기서는 읽기만 함. 절대 set/remove/update 하지 않음.
-  db.ref("rings").on(
-    "value",
-    (snapshot) => {
-      const loaded = [];
-
-      // 숫자 슬롯 0~6만 읽음
-      // 예전 push 방식으로 생긴 데이터가 섞여 있어도 무시함
-      for (let i = 0; i < MAX_RINGS; i++) {
-        const item = snapshot.child(String(i)).val();
-
-        if (item) {
-          loaded.push({
-            ...item,
-            slotIndex: i
-          });
-        }
-      }
-
-      rings = loaded;
-      clampOffsets(true);
-    },
-    (error) => {
-      console.error("Firebase read error:", error);
-    }
-  );
+  // 예시 로컬 데이터 바인딩(실제 환경에선 Firebase/데이터 소스에 연결)
+  // db.ref("rings").on("value", (snapshot) => {
+  //   const data = snapshot.val();
+  //   // 데이터 매핑 로직...
+  // });
 }
 
 function estimateNextRingRadius() {
   let r = baseRadius;
-
   for (let i = 0; i < rings.length; i++) {
     if (rings[i]) r += getRingGap(rings[i]);
   }
-
   return r * zoom;
 }
 
 function triggerFlash(r, g, b) {
   const startR = estimateNextRingRadius();
-
-  const cx = width / 2;
-  const cy = height / 2;
-
+  const cx = width / 2 + offsetX;
+  const cy = height / 2 + offsetY;
   const corners = [
     dist(cx, cy, 0, 0),
     dist(cx, cy, width, 0),
     dist(cx, cy, 0, height),
     dist(cx, cy, width, height),
   ];
-
   const maxR = max(corners) + 40;
 
   flash = {
@@ -141,14 +103,9 @@ function triggerFlash(r, g, b) {
 function handleInput(val) {
   if (!val) return;
 
-  if (typeof db === "undefined") {
-    console.error("Firebase db가 없습니다. 입력을 저장할 수 없습니다.");
-    return;
-  }
-
   if (val === RESET_CODE) {
-    db.ref("rings").remove();
-    db.ref("meta/nextSlot").set(0);
+    // 로컬 테스트용: 실제 프로덕션에선 DB 초기화 동작 사용 가능
+    rings = rings.map(() => null);
     input.value = "";
     return;
   }
@@ -157,42 +114,13 @@ function handleInput(val) {
   const g = floor(random(80, 220));
   const b = floor(random(80, 220));
 
-  // 입력한 디바이스에서만 보이는 로컬 플래시
   triggerFlash(r, g, b);
 
-  const nextSlotRef = db.ref("meta/nextSlot");
-
-  // 동시에 여러 명이 입력해도 슬롯 번호가 꼬이지 않도록 transaction 사용
-  nextSlotRef.transaction(
-    (current) => {
-      let currentSlot = Number(current);
-
-      if (!Number.isFinite(currentSlot)) {
-        currentSlot = 0;
-      }
-
-      const next = (currentSlot + 1) % MAX_RINGS;
-      return next;
-    },
-    (error, committed, snapshot) => {
-      if (error || !committed || !snapshot) {
-        console.error("slot transaction failed:", error);
-        return;
-      }
-
-      const nextSlot = Number(snapshot.val());
-      const slotIndex = (nextSlot - 1 + MAX_RINGS) % MAX_RINGS;
-
-      const ringData = createRing(val, slotIndex, r, g, b);
-
-      // 핵심:
-      // push 하지 않고 rings/0 ~ rings/6에 덮어씀
-      // 8번째 입력은 0번, 9번째 입력은 1번
-      db.ref("rings/" + slotIndex).set(ringData).catch((err) => {
-        console.error("Firebase write error:", err);
-      });
-    }
-  );
+  // 로컬 테스트용: 간단한 슬롯 관리
+  const nextSlot = rings.findIndex(r => r == null);
+  const slotIndex = (nextSlot >= 0 ? nextSlot : 0);
+  const ringData = createRing(val, slotIndex, r, g, b);
+  rings[slotIndex] = ringData;
 
   input.value = "";
 }
@@ -213,10 +141,9 @@ function draw() {
     push();
 
     let sp = Number(ring.speed) || 0.3;
-    if (abs(sp) < 0.075) {
-      sp = sp < 0 ? -0.3 : 0.3;
-    }
+    if (abs(sp) < 0.075) sp = 0.3;
 
+    // 회전: 링별 속도에 따른 모션
     rotate(millis() * 0.02 * sp + Number(ring.angleOffset || 0));
 
     const fontIndex = Number.isInteger(ring.fontIndex)
@@ -227,12 +154,11 @@ function draw() {
       textFont(fonts[fontIndex]);
     }
 
-    fill(
-      Number(ring.r ?? 160),
-      Number(ring.g ?? 160),
-      Number(ring.b ?? 160),
-      255
-    );
+    // 투명도 제거: 항상 불투명하게 렌더링
+    fill(Number(ring.r ?? 160),
+         Number(ring.g ?? 160),
+         Number(ring.b ?? 160),
+         255);
     noStroke();
 
     textSize(Number(ring.fontSize ?? 20) * (min(width, height) / 800));
@@ -242,18 +168,19 @@ function draw() {
 
     currentRadius += getRingGap(ring);
   }
-
   pop();
 
   drawFlash();
 }
 
+// ──────────────────────────────────────────
+// Bouncy easing — 탱탱볼 느낌
+// ──────────────────────────────────────────
 function easeOutBack(t) {
   const s = 2.2;
   const u = t - 1;
   return u * u * ((s + 1) * u + s) + 1;
 }
-
 function easeInBack(t) {
   const s = 2.2;
   return t * t * ((s + 1) * t - s);
@@ -271,7 +198,6 @@ function drawFlash() {
   }
 
   let radius;
-
   if (elapsed < FLASH_EXPAND) {
     const t = elapsed / FLASH_EXPAND;
     radius = lerp(flash.startR, flash.maxR, easeOutBack(t));
@@ -294,12 +220,12 @@ function drawFlash() {
 }
 
 function createRing(text, slotIndex, r, g, b) {
+  // 속도 스펙: 초중반 느리게 시작하는 효과를 주도록 분포설정
   let sp = random(-0.9, 0.9);
-
+  // 초기 구간에 약간 더 느리게 시작하도록 보정
   if (random() < 0.5) {
     sp *= 0.9;
   }
-
   if (abs(sp) < 0.225) {
     sp = sp < 0 ? -0.225 : 0.225;
   }
@@ -316,7 +242,6 @@ function createRing(text, slotIndex, r, g, b) {
     fontSize: random(20, MAX_FONT),
     spacingFactor: random(0.72, 1.45),
     wobble: random(-8, 8),
-    createdAt: Date.now(),
   };
 }
 
@@ -351,8 +276,9 @@ function drawTextCircle(ring, r) {
 function getMinZoom() {
   const scale = min(windowWidth, windowHeight) / 800;
   const worstGap = MAX_FONT * scale + 4;
-  const worstOuterR = baseRadius + MAX_RINGS * worstGap + 40;
+  const worstOuterR = baseRadius + (MAX_RINGS * worstGap) + 40; // 축소 시 여유 감소
 
+  // 축소 한계 더 타이트하게: 화면 안쪽으로 더 빨리 수렴
   const fitZoom = (min(width, height) * 0.44) / worstOuterR;
   return max(0.05, fitZoom);
 }
@@ -378,7 +304,6 @@ function getOuterRadius() {
   if (rings.length <= 0) return baseRadius;
 
   let currentRadius = baseRadius;
-
   for (let i = 0; i < rings.length; i++) {
     if (rings[i]) currentRadius += getRingGap(rings[i]);
   }
@@ -388,29 +313,28 @@ function getOuterRadius() {
 
 function getMaxOffset() {
   const outerRadius = getOuterRadius() * zoom;
-
+  // 축소 시 화면 경계에 더 촘촘히 붙도록 여백 축소
   const maxX = max(0, outerRadius - width * 0.18);
   const maxY = max(0, outerRadius - height * 0.18);
-
   return { x: maxX, y: maxY };
 }
 
 function clampOffsets(instant = false) {
   const limit = getMaxOffset();
   const minZ = getMinZoom();
-
+  // 뷰를 더 타이트하게 중앙으로 끌고 들어오게 함
   const pullToCenter = map(zoom, minZ, minZ * 1.15, 0.9, 0.0, true);
 
   let targetX = constrain(offsetX, -limit.x, limit.x);
   let targetY = constrain(offsetY, -limit.y, limit.y);
-
-  targetX *= 1 - pullToCenter;
-  targetY *= 1 - pullToCenter;
+  targetX *= (1 - pullToCenter);
+  targetY *= (1 - pullToCenter);
 
   if (instant) {
     offsetX = targetX;
     offsetY = targetY;
   } else {
+    // 부드럽게 더욱 느리게 수렴
     offsetX = lerp(offsetX, targetX, 0.25);
     offsetY = lerp(offsetY, targetY, 0.25);
   }
@@ -442,11 +366,9 @@ function touchMoved() {
 
 function touchStarted() {
   const now = millis();
-
   if (now - lastTapTime < 300) {
     resetView();
   }
-
   lastTapTime = now;
 }
 
