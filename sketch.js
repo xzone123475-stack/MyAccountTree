@@ -1,4 +1,4 @@
-// 스케치: Firebase에 전체 화면 상태를 저장하는 안정 버전
+// 스케치: 링 모음의 원형 배열과 플래시 모션을 가진 애니메이션
 let rings = [];
 let input;
 let baseRadius;
@@ -6,9 +6,6 @@ let baseRadius;
 const RESET_CODE = "1125";
 const MAX_RINGS = 7;
 const MAX_FONT = 56;
-
-// 화면 상태 전체를 저장할 Firebase 경로
-const STATE_PATH = "treeState";
 
 let zoom = 1;
 let offsetX = 0;
@@ -75,43 +72,27 @@ function setup() {
     return;
   }
 
-  // 중요:
-  // 여기서는 Firebase에서 읽기만 함.
-  // 새로고침해도 Firebase에 저장된 treeState/rings를 다시 불러옴.
-  db.ref(STATE_PATH).on(
+  // Firebase 실시간 연결
+  // 중요: 여기서는 읽기만 함. 절대 set/remove/update 하지 않음.
+  db.ref("rings").on(
     "value",
     (snapshot) => {
-      const state = snapshot.val();
-
-      if (!state || !state.rings) {
-        rings = [];
-        clampOffsets(true);
-        return;
-      }
-
       const loaded = [];
 
-      if (Array.isArray(state.rings)) {
-        for (let i = 0; i < state.rings.length; i++) {
-          if (state.rings[i]) {
-            loaded.push(state.rings[i]);
-          }
+      // 숫자 슬롯 0~6만 읽음
+      // 예전 push 방식으로 생긴 데이터가 섞여 있어도 무시함
+      for (let i = 0; i < MAX_RINGS; i++) {
+        const item = snapshot.child(String(i)).val();
+
+        if (item) {
+          loaded.push({
+            ...item,
+            slotIndex: i
+          });
         }
-      } else {
-        Object.keys(state.rings).forEach((key) => {
-          if (state.rings[key]) {
-            loaded.push(state.rings[key]);
-          }
-        });
       }
 
-      loaded.sort((a, b) => {
-        const sa = Number(a.slotIndex ?? 0);
-        const sb = Number(b.slotIndex ?? 0);
-        return sa - sb;
-      });
-
-      rings = loaded.slice(0, MAX_RINGS);
+      rings = loaded;
       clampOffsets(true);
     },
     (error) => {
@@ -166,11 +147,8 @@ function handleInput(val) {
   }
 
   if (val === RESET_CODE) {
-    db.ref(STATE_PATH).set({
-      nextSlot: 0,
-      rings: []
-    });
-
+    db.ref("rings").remove();
+    db.ref("meta/nextSlot").set(0);
     input.value = "";
     return;
   }
@@ -179,59 +157,40 @@ function handleInput(val) {
   const g = floor(random(80, 220));
   const b = floor(random(80, 220));
 
-  // 입력한 디바이스에서만 실행되는 로컬 플래시
+  // 입력한 디바이스에서만 보이는 로컬 플래시
   triggerFlash(r, g, b);
 
-  // 중요:
-  // 링 배열과 다음 슬롯 번호를 하나의 transaction에서 같이 수정.
-  // 여러 명이 동시에 입력해도 최대한 안전하게 순환 덮어쓰기.
-  db.ref(STATE_PATH).transaction(
-    (state) => {
-      if (!state) {
-        state = {
-          nextSlot: 0,
-          rings: []
-        };
+  const nextSlotRef = db.ref("meta/nextSlot");
+
+  // 동시에 여러 명이 입력해도 슬롯 번호가 꼬이지 않도록 transaction 사용
+  nextSlotRef.transaction(
+    (current) => {
+      let currentSlot = Number(current);
+
+      if (!Number.isFinite(currentSlot)) {
+        currentSlot = 0;
       }
 
-      if (!Array.isArray(state.rings)) {
-        const converted = [];
-
-        if (state.rings && typeof state.rings === "object") {
-          Object.keys(state.rings).forEach((key) => {
-            const item = state.rings[key];
-            if (item) converted.push(item);
-          });
-
-          converted.sort((a, b) => {
-            const sa = Number(a.slotIndex ?? 0);
-            const sb = Number(b.slotIndex ?? 0);
-            return sa - sb;
-          });
-        }
-
-        state.rings = converted.slice(0, MAX_RINGS);
-      }
-
-      while (state.rings.length < MAX_RINGS) {
-        state.rings.push(null);
-      }
-
-      const currentSlot = Number.isFinite(Number(state.nextSlot))
-        ? Number(state.nextSlot)
-        : 0;
-
-      const slotIndex = currentSlot % MAX_RINGS;
-
-      state.rings[slotIndex] = createRing(val, slotIndex, r, g, b);
-      state.nextSlot = (slotIndex + 1) % MAX_RINGS;
-
-      return state;
+      const next = (currentSlot + 1) % MAX_RINGS;
+      return next;
     },
-    (error, committed) => {
-      if (error || !committed) {
-        console.error("Firebase state transaction failed:", error);
+    (error, committed, snapshot) => {
+      if (error || !committed || !snapshot) {
+        console.error("slot transaction failed:", error);
+        return;
       }
+
+      const nextSlot = Number(snapshot.val());
+      const slotIndex = (nextSlot - 1 + MAX_RINGS) % MAX_RINGS;
+
+      const ringData = createRing(val, slotIndex, r, g, b);
+
+      // 핵심:
+      // push 하지 않고 rings/0 ~ rings/6에 덮어씀
+      // 8번째 입력은 0번, 9번째 입력은 1번
+      db.ref("rings/" + slotIndex).set(ringData).catch((err) => {
+        console.error("Firebase write error:", err);
+      });
     }
   );
 
@@ -254,7 +213,9 @@ function draw() {
     push();
 
     let sp = Number(ring.speed) || 0.3;
-    if (abs(sp) < 0.075) sp = sp < 0 ? -0.3 : 0.3;
+    if (abs(sp) < 0.075) {
+      sp = sp < 0 ? -0.3 : 0.3;
+    }
 
     rotate(millis() * 0.02 * sp + Number(ring.angleOffset || 0));
 
