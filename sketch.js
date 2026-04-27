@@ -41,6 +41,19 @@ function preload() {
   ];
 }
 
+// HTML에서 const db = firebase.database(); 로 선언된 전역을 안전하게 가져온다.
+// const는 window에 안 붙으므로 typeof로 확인.
+function getDB() {
+  try {
+    if (typeof db !== "undefined" && db) return db;
+  } catch (e) {}
+  if (typeof window !== "undefined" && window.db) return window.db;
+  if (typeof firebase !== "undefined" && firebase.database) {
+    try { return firebase.database(); } catch (e) {}
+  }
+  return null;
+}
+
 function setup() {
   createCanvas(windowWidth, windowHeight);
   angleMode(DEGREES);
@@ -65,9 +78,9 @@ function setup() {
   });
 
   // ✅ Firebase 실시간 구독 — 새로고침/다른 디바이스에서도 상태 복원
-  // index.html에서 firebase 초기화 후 window.db = firebase.database() 로 노출되어 있어야 함
-  if (window.db) {
-    window.db.ref("rings").on("value", (snapshot) => {
+  const database = getDB();
+  if (database) {
+    database.ref("rings").on("value", (snapshot) => {
       const data = snapshot.val(); // 객체 또는 null
       const next = new Array(MAX_RINGS).fill(null);
       if (data) {
@@ -122,10 +135,12 @@ function triggerFlash(r, g, b) {
 function handleInput(val) {
   if (!val) return;
 
+  const database = getDB();
+
   // 🔒 1125만 초기화. 그 외 어떤 경로에서도 rings를 비우지 않음.
   if (val === RESET_CODE) {
-    if (window.db) {
-      window.db.ref("rings").remove();
+    if (database) {
+      database.ref("rings").remove();
     } else {
       rings = new Array(MAX_RINGS).fill(null);
     }
@@ -139,13 +154,13 @@ function handleInput(val) {
 
   triggerFlash(r, g, b);
 
-  const nextSlot = rings.findIndex(r => r == null);
+  const nextSlot = rings.findIndex(x => x == null);
   const slotIndex = (nextSlot >= 0 ? nextSlot : 0);
   const ringData = createRing(val, slotIndex, r, g, b);
 
-  if (window.db) {
+  if (database) {
     // ✅ DB에 저장 → on("value") 콜백이 다시 rings를 갱신
-    window.db.ref("rings/" + slotIndex).set(ringData);
+    database.ref("rings/" + slotIndex).set(ringData);
   } else {
     rings[slotIndex] = ringData; // 오프라인 폴백
   }
