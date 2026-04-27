@@ -18,14 +18,10 @@ let fontsReady = false;
 
 let isComposing = false;
 
-// 플래시 모션 상태
-let flash = null; // { r,g,b, start, duration }
-const FLASH_DURATION = 900; // ms
-let prevRingsSnapshot = {}; // slotIndex → text 비교용
+// 플래시 모션 상태 (입력자 본인 한정)
+let flash = null;
+const FLASH_DURATION = 900;
 
-// ──────────────────────────────────────────
-// 링 간격: fontSize 기반으로 딱 붙게
-// ──────────────────────────────────────────
 function getRingGap(ring) {
   const scaledFont = Number(ring.fontSize ?? 20) * (min(windowWidth, windowHeight) / 800);
   return scaledFont + 4;
@@ -62,34 +58,19 @@ function setup() {
     }
   });
 
-  // Firebase: 슬롯 기반(slot0~slot6) 구조로 읽기
+  // Firebase: 다른 사용자 변경에는 플래시 안 띄움
   db.ref("rings").on("value", (snapshot) => {
     const data = snapshot.val();
     rings = new Array(MAX_RINGS).fill(null);
-
-    const newSnapshot = {};
 
     if (data) {
       Object.values(data).forEach((item) => {
         const idx = Number(item.slotIndex ?? 0);
         if (idx >= 0 && idx < MAX_RINGS) {
           rings[idx] = item;
-          newSnapshot[idx] = item.text;
         }
       });
     }
-
-    // 새로 추가/변경된 링 감지 → 플래시 트리거
-    for (const idx in newSnapshot) {
-      if (prevRingsSnapshot[idx] !== newSnapshot[idx]) {
-        const ring = rings[idx];
-        if (ring) {
-          triggerFlash(ring.r, ring.g, ring.b);
-        }
-        break;
-      }
-    }
-    prevRingsSnapshot = newSnapshot;
 
     rings = rings.filter((r) => r !== null);
     clampOffsets(true);
@@ -106,29 +87,35 @@ function triggerFlash(r, g, b) {
   };
 }
 
-// ──────────────────────────────────────────
-// handleInput: 트랜잭션으로 race condition 방지
-// ──────────────────────────────────────────
 function handleInput(val) {
   if (!val) return;
 
   if (val === RESET_CODE) {
     db.ref("rings").remove();
     db.ref("meta").remove();
-  } else {
-    db.ref("meta/nextSlot").transaction((currentSlot) => {
-      const slot = (currentSlot ?? 0) % MAX_RINGS;
-      return (slot + 1) % MAX_RINGS;
-    }).then((result) => {
-      if (!result.committed) return;
-
-      const nextSlot = result.snapshot.val();
-      const slotIndex = (nextSlot - 1 + MAX_RINGS) % MAX_RINGS;
-
-      const ringData = createRing(val, slotIndex);
-      db.ref("rings/slot" + slotIndex).set(ringData);
-    });
+    input.value = "";
+    return;
   }
+
+  // 본인 디바이스에서만 플래시
+  const r = floor(random(80, 220));
+  const g = floor(random(80, 220));
+  const b = floor(random(80, 220));
+
+  triggerFlash(r, g, b);
+
+  db.ref("meta/nextSlot").transaction((currentSlot) => {
+    const slot = (currentSlot ?? 0) % MAX_RINGS;
+    return (slot + 1) % MAX_RINGS;
+  }).then((result) => {
+    if (!result.committed) return;
+
+    const nextSlot = result.snapshot.val();
+    const slotIndex = (nextSlot - 1 + MAX_RINGS) % MAX_RINGS;
+
+    const ringData = createRing(val, slotIndex, r, g, b);
+    db.ref("rings/slot" + slotIndex).set(ringData);
+  });
 
   input.value = "";
 }
@@ -177,28 +164,22 @@ function draw() {
   }
   pop();
 
-  // 플래시 오버레이: 화면 전체 → 중앙점으로 수축
   drawFlash();
 }
 
-// ──────────────────────────────────────────
-// 플래시: 화면을 가득 덮은 컬러 사각형이 중앙으로 수축하며 사라짐
-// ──────────────────────────────────────────
 function drawFlash() {
   if (!flash) return;
 
   const elapsed = millis() - flash.start;
-  const t = elapsed / flash.duration;
+  const t = constrain(elapsed / flash.duration, 0, 1);
 
   if (t >= 1) {
     flash = null;
     return;
   }
 
-  // ease-in-cubic: 처음엔 천천히 줄다가 끝에서 빠르게 사라짐
   const eased = t * t * t;
   const scaleFactor = 1 - eased;
-  const alpha = 255 * (1 - t * 0.3); // 끝까지 진하게 유지하다 살짝만 흐려짐
 
   const w = width * scaleFactor;
   const h = height * scaleFactor;
@@ -206,22 +187,17 @@ function drawFlash() {
   push();
   resetMatrix();
   noStroke();
-  fill(flash.r, flash.g, flash.b, alpha);
+  fill(flash.r, flash.g, flash.b, 255);
   rectMode(CENTER);
   rect(width / 2, height / 2, w, h);
   pop();
 }
 
-function createRing(text, slotIndex) {
-  // 속도 다양성 1.5배 (기존 ±0.6 → ±0.9, 최소 0.15 → 0.225)
+function createRing(text, slotIndex, r, g, b) {
   let sp = random(-0.9, 0.9);
   if (abs(sp) < 0.225) {
     sp = sp < 0 ? -0.225 : 0.225;
   }
-
-  const r = floor(random(80, 220));
-  const g = floor(random(80, 220));
-  const b = floor(random(80, 220));
 
   return {
     text: text,
@@ -266,9 +242,6 @@ function drawTextCircle(ring, r) {
   }
 }
 
-// ──────────────────────────────────────────
-// 최소 줌: 7링 × 최대 폰트(56) 기준 — 항상 7링 다 들어옴
-// ──────────────────────────────────────────
 function getMinZoom() {
   const scale = min(windowWidth, windowHeight) / 800;
   const worstGap = MAX_FONT * scale + 4;
@@ -278,9 +251,6 @@ function getMinZoom() {
   return max(0.05, fitZoom);
 }
 
-// ──────────────────────────────────────────
-// 줌: 순수 중앙 기준
-// ──────────────────────────────────────────
 function applyZoomCenter(newZoom) {
   const minZoom = getMinZoom();
   zoom = constrain(newZoom, minZoom, 6);
