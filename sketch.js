@@ -18,11 +18,11 @@ let fontsReady = false;
 
 let isComposing = false;
 
-// 플래시 모션
+// 플래시 모션 (전체적으로 더 빠르게)
 let flash = null;
-const FLASH_EXPAND = 220;   // ms - 시작링 → 전체화면
-const FLASH_HOLD = 120;     // ms - 전체 덮은 채 대기
-const FLASH_SHRINK = 380;   // ms - 전체화면 → 중앙점
+const FLASH_EXPAND = 140;
+const FLASH_HOLD = 70;
+const FLASH_SHRINK = 240;
 
 function getRingGap(ring) {
   const scaledFont = Number(ring.fontSize ?? 20) * (min(windowWidth, windowHeight) / 800);
@@ -78,22 +78,16 @@ function setup() {
   });
 }
 
-// ──────────────────────────────────────────
-// 새 링이 그려질 반지름(화면 좌표 기준) 추정
-// 현재 링들 + 평균 gap 하나 더 = 곧 들어올 자리
-// ──────────────────────────────────────────
 function estimateNextRingRadius() {
   let r = baseRadius;
   for (let i = 0; i < rings.length; i++) {
     if (rings[i]) r += getRingGap(rings[i]);
   }
-  // 화면에 보이는 크기로 변환 (zoom 적용)
   return r * zoom;
 }
 
 function triggerFlash(r, g, b) {
   const startR = estimateNextRingRadius();
-  // 화면 모서리까지 거리(중앙 기준)
   const cx = width / 2 + offsetX;
   const cy = height / 2 + offsetY;
   const corners = [
@@ -102,7 +96,7 @@ function triggerFlash(r, g, b) {
     dist(cx, cy, 0, height),
     dist(cx, cy, width, height),
   ];
-  const maxR = max(corners) + 20;
+  const maxR = max(corners) + 40;
 
   flash = {
     r: Number(r ?? 160),
@@ -196,17 +190,15 @@ function draw() {
 }
 
 // ──────────────────────────────────────────
-// Bouncy easing (탱탱볼 느낌)
-// easeOutBack: 약간 오버슈트 후 정착
-// easeInBack:  살짝 뒤로 당겼다가 빠르게 사라짐
+// Bouncy easing — 탱탱볼 느낌
 // ──────────────────────────────────────────
 function easeOutBack(t) {
-  const s = 1.70158;
+  const s = 2.2;
   const u = t - 1;
   return u * u * ((s + 1) * u + s) + 1;
 }
 function easeInBack(t) {
-  const s = 1.70158;
+  const s = 2.2;
   return t * t * ((s + 1) * t - s);
 }
 
@@ -223,18 +215,13 @@ function drawFlash() {
 
   let radius;
   if (elapsed < FLASH_EXPAND) {
-    // Phase 1: 링 위치/크기 → 화면 전체 (탱탱볼처럼 살짝 오버슈트)
     const t = elapsed / FLASH_EXPAND;
-    const e = easeOutBack(t);
-    radius = lerp(flash.startR, flash.maxR, e);
+    radius = lerp(flash.startR, flash.maxR, easeOutBack(t));
   } else if (elapsed < FLASH_EXPAND + FLASH_HOLD) {
-    // Phase 2: 잠깐 대기
     radius = flash.maxR;
   } else {
-    // Phase 3: 중앙점으로 수축 (튕기듯 빠르게)
     const t = (elapsed - FLASH_EXPAND - FLASH_HOLD) / FLASH_SHRINK;
-    const e = easeInBack(t);
-    radius = lerp(flash.maxR, 0, e);
+    radius = lerp(flash.maxR, 0, easeInBack(t));
   }
 
   if (radius <= 0) return;
@@ -242,7 +229,8 @@ function drawFlash() {
   push();
   resetMatrix();
   noStroke();
-  fill(flash.r, flash.g, flash.b);
+  ellipseMode(CENTER);
+  fill(flash.r, flash.g, flash.b); // 항상 솔리드 — 알파/투명도 없음
   ellipse(flash.cx, flash.cy, radius * 2, radius * 2);
   pop();
 }
