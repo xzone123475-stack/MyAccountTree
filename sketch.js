@@ -1,4 +1,4 @@
-// 스케치: 링 모음의 원형 배열과 플래시 모션을 가진 애니메이션
+// 스케치: Firebase에 전체 화면 상태를 저장하는 안정 버전
 let rings = [];
 let input;
 let baseRadius;
@@ -6,6 +6,9 @@ let baseRadius;
 const RESET_CODE = "1125";
 const MAX_RINGS = 7;
 const MAX_FONT = 56;
+
+// 화면 상태 전체를 저장할 Firebase 경로
+const STATE_PATH = "treeState";
 
 let zoom = 1;
 let offsetX = 0;
@@ -19,17 +22,15 @@ let fontsReady = false;
 
 let isComposing = false;
 
-// 플래시 모션 (전체적으로 더 빠르게) - 완전 수정: 초기 구간 느리게 시작하도록 구성
 let flash = null;
-const FLASH_EXPAND = 80;  // 초기 확장 속도 느림
-const FLASH_HOLD = 60;    // 유지 기간 증가
-const FLASH_SHRINK = 180; // 축소 속도 조정
+const FLASH_EXPAND = 80;
+const FLASH_HOLD = 60;
+const FLASH_SHRINK = 180;
 
 function getRingGap(ring) {
   const scaledFont =
     Number(ring.fontSize ?? 20) * (min(windowWidth, windowHeight) / 800);
 
-  // 텍스트끼리 너무 멀지 않게, 그래도 안 겹치게
   return scaledFont + 4;
 }
 
@@ -69,24 +70,40 @@ function setup() {
     }
   });
 
-  // Firebase 실시간 연결
-  // 중요: 여기서는 읽기만 함. set/remove/update 하지 않음.
   if (typeof db === "undefined") {
     console.error("Firebase db가 정의되지 않았습니다. firebase.js 연결을 확인하세요.");
     return;
   }
 
-  db.ref("rings").on(
+  // 중요:
+  // 여기서는 Firebase에서 읽기만 함.
+  // 새로고침해도 Firebase에 저장된 treeState/rings를 다시 불러옴.
+  db.ref(STATE_PATH).on(
     "value",
     (snapshot) => {
+      const state = snapshot.val();
+
+      if (!state || !state.rings) {
+        rings = [];
+        clampOffsets(true);
+        return;
+      }
+
       const loaded = [];
 
-      snapshot.forEach((child) => {
-        loaded.push({
-          key: child.key,
-          ...child.val(),
+      if (Array.isArray(state.rings)) {
+        for (let i = 0; i < state.rings.length; i++) {
+          if (state.rings[i]) {
+            loaded.push(state.rings[i]);
+          }
+        }
+      } else {
+        Object.keys(state.rings).forEach((key) => {
+          if (state.rings[key]) {
+            loaded.push(state.rings[key]);
+          }
         });
-      });
+      }
 
       loaded.sort((a, b) => {
         const sa = Number(a.slotIndex ?? 0);
@@ -116,7 +133,6 @@ function estimateNextRingRadius() {
 function triggerFlash(r, g, b) {
   const startR = estimateNextRingRadius();
 
-  // 화면 정중앙 기준
   const cx = width / 2;
   const cy = height / 2;
 
@@ -150,8 +166,11 @@ function handleInput(val) {
   }
 
   if (val === RESET_CODE) {
-    db.ref("rings").remove();
-    db.ref("meta/nextSlot").set(0);
+    db.ref(STATE_PATH).set({
+      nextSlot: 0,
+      rings: []
+    });
+
     input.value = "";
     return;
   }
@@ -163,30 +182,56 @@ function handleInput(val) {
   // 입력한 디바이스에서만 실행되는 로컬 플래시
   triggerFlash(r, g, b);
 
-  const nextSlotRef = db.ref("meta/nextSlot");
-
-  // 동시에 여러 명이 입력해도 슬롯 번호가 최대한 겹치지 않게 transaction 사용
-  nextSlotRef.transaction(
-    (current) => {
-      const currentSlot = Number.isFinite(Number(current)) ? Number(current) : 0;
-      return (currentSlot + 1) % MAX_RINGS;
-    },
-    (error, committed, snapshot) => {
-      if (error || !committed || !snapshot) {
-        console.error("slot transaction failed:", error);
-        return;
+  // 중요:
+  // 링 배열과 다음 슬롯 번호를 하나의 transaction에서 같이 수정.
+  // 여러 명이 동시에 입력해도 최대한 안전하게 순환 덮어쓰기.
+  db.ref(STATE_PATH).transaction(
+    (state) => {
+      if (!state) {
+        state = {
+          nextSlot: 0,
+          rings: []
+        };
       }
 
-      const nextSlot = Number(snapshot.val());
-      const slotIndex = (nextSlot - 1 + MAX_RINGS) % MAX_RINGS;
+      if (!Array.isArray(state.rings)) {
+        const converted = [];
 
-      const ringData = createRing(val, slotIndex, r, g, b);
+        if (state.rings && typeof state.rings === "object") {
+          Object.keys(state.rings).forEach((key) => {
+            const item = state.rings[key];
+            if (item) converted.push(item);
+          });
 
-      // 0~6 슬롯에 덮어쓰기
-      // 8번째 입력은 0번, 9번째 입력은 1번 슬롯을 덮어씀
-      db.ref("rings/" + slotIndex).set(ringData).catch((err) => {
-        console.error("Firebase write error:", err);
-      });
+          converted.sort((a, b) => {
+            const sa = Number(a.slotIndex ?? 0);
+            const sb = Number(b.slotIndex ?? 0);
+            return sa - sb;
+          });
+        }
+
+        state.rings = converted.slice(0, MAX_RINGS);
+      }
+
+      while (state.rings.length < MAX_RINGS) {
+        state.rings.push(null);
+      }
+
+      const currentSlot = Number.isFinite(Number(state.nextSlot))
+        ? Number(state.nextSlot)
+        : 0;
+
+      const slotIndex = currentSlot % MAX_RINGS;
+
+      state.rings[slotIndex] = createRing(val, slotIndex, r, g, b);
+      state.nextSlot = (slotIndex + 1) % MAX_RINGS;
+
+      return state;
+    },
+    (error, committed) => {
+      if (error || !committed) {
+        console.error("Firebase state transaction failed:", error);
+      }
     }
   );
 
@@ -211,7 +256,6 @@ function draw() {
     let sp = Number(ring.speed) || 0.3;
     if (abs(sp) < 0.075) sp = sp < 0 ? -0.3 : 0.3;
 
-    // 회전: 링별 속도에 따른 모션
     rotate(millis() * 0.02 * sp + Number(ring.angleOffset || 0));
 
     const fontIndex = Number.isInteger(ring.fontIndex)
@@ -243,9 +287,6 @@ function draw() {
   drawFlash();
 }
 
-// ──────────────────────────────────────────
-// Bouncy easing — 탱탱볼 느낌
-// ──────────────────────────────────────────
 function easeOutBack(t) {
   const s = 2.2;
   const u = t - 1;
@@ -292,7 +333,6 @@ function drawFlash() {
 }
 
 function createRing(text, slotIndex, r, g, b) {
-  // 기존 속도 구조 최대한 유지
   let sp = random(-0.9, 0.9);
 
   if (random() < 0.5) {
