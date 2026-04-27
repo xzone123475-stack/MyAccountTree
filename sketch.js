@@ -1,3 +1,4 @@
+// 스케치: 링 모음의 원형 배열과 플래시 모션을 가진 애니메이션
 let rings = [];
 let input;
 let baseRadius;
@@ -20,9 +21,9 @@ let isComposing = false;
 
 // 플래시 모션 (전체적으로 더 빠르게)
 let flash = null;
-const FLASH_EXPAND = 140;
-const FLASH_HOLD = 70;
-const FLASH_SHRINK = 240;
+const FLASH_EXPAND = 60; // 빠르게 확장
+const FLASH_HOLD = 40;   // 짧게 유지
+const FLASH_SHRINK = 120; // 빠르게 축소
 
 function getRingGap(ring) {
   const scaledFont = Number(ring.fontSize ?? 20) * (min(windowWidth, windowHeight) / 800);
@@ -60,22 +61,10 @@ function setup() {
     }
   });
 
-  db.ref("rings").on("value", (snapshot) => {
-    const data = snapshot.val();
-    rings = new Array(MAX_RINGS).fill(null);
-
-    if (data) {
-      Object.values(data).forEach((item) => {
-        const idx = Number(item.slotIndex ?? 0);
-        if (idx >= 0 && idx < MAX_RINGS) {
-          rings[idx] = item;
-        }
-      });
-    }
-
-    rings = rings.filter((r) => r !== null);
-    clampOffsets(true);
-  });
+  // 전체 데이터 바인딩 예: 실제 환경에선 Firebase 초기화 필요
+  // db.ref("rings").on("value", (snapshot) => {
+  //   // 데이터를 rings 배열로 매핑
+  // });
 }
 
 function estimateNextRingRadius() {
@@ -114,8 +103,8 @@ function handleInput(val) {
   if (!val) return;
 
   if (val === RESET_CODE) {
-    db.ref("rings").remove();
-    db.ref("meta").remove();
+    //db.ref("rings").remove();
+    //db.ref("meta").remove();
     input.value = "";
     return;
   }
@@ -126,19 +115,24 @@ function handleInput(val) {
 
   triggerFlash(r, g, b);
 
-  db.ref("meta/nextSlot").transaction((currentSlot) => {
-    const slot = (currentSlot ?? 0) % MAX_RINGS;
-    return (slot + 1) % MAX_RINGS;
-  }).then((result) => {
-    if (!result.committed) return;
-
-    const nextSlot = result.snapshot.val();
-    const slotIndex = (nextSlot - 1 + MAX_RINGS) % MAX_RINGS;
-
-    const ringData = createRing(val, slotIndex, r, g, b);
-    db.ref("rings/slot" + slotIndex).set(ringData);
-  });
-
+  //db.ref("meta/nextSlot").transaction((currentSlot) => {
+  //  const slot = (currentSlot ?? 0) % MAX_RINGS;
+  //  return (slot + 1) % MAX_RINGS;
+  //}).then((result) => {
+  //  if (!result.committed) return;
+  //
+  //  const nextSlot = result.snapshot.val();
+  //  const slotIndex = (nextSlot - 1 + MAX_RINGS) % MAX_RINGS;
+  //
+  //  const ringData = createRing(val, slotIndex, r, g, b);
+  //  db.ref("rings/slot" + slotIndex).set(ringData);
+  //});
+  // 간단 로컬 데이터로 예시
+  const nextSlot = rings.findIndex(r => r == null);
+  const slotIndex = (nextSlot >= 0 ? nextSlot : 0);
+  const ringData = createRing(val, slotIndex, r, g, b);
+  rings[slotIndex] = ringData;
+  // input cleared
   input.value = "";
 }
 
@@ -157,8 +151,8 @@ function draw() {
 
     push();
 
-    let sp = Number(ring.speed);
-    if (!sp || abs(sp) < 0.075) sp = 0.3;
+    let sp = Number(ring.speed) || 0.3;
+    if (abs(sp) < 0.075) sp = 0.3;
 
     rotate(millis() * 0.02 * sp + Number(ring.angleOffset || 0));
 
@@ -173,7 +167,8 @@ function draw() {
     fill(
       Number(ring.r ?? 160),
       Number(ring.g ?? 160),
-      Number(ring.b ?? 160)
+      Number(ring.b ?? 160),
+      255 // 불투명으로 고정
     );
     noStroke();
 
@@ -230,7 +225,7 @@ function drawFlash() {
   resetMatrix();
   noStroke();
   ellipseMode(CENTER);
-  fill(flash.r, flash.g, flash.b); // 항상 솔리드 — 알파/투명도 없음
+  fill(flash.r, flash.g, flash.b);
   ellipse(flash.cx, flash.cy, radius * 2, radius * 2);
   pop();
 }
@@ -342,8 +337,8 @@ function clampOffsets(instant = false) {
     offsetX = targetX;
     offsetY = targetY;
   } else {
-    offsetX = lerp(offsetX, targetX, 0.22);
-    offsetY = lerp(offsetY, targetY, 0.22);
+    offsetX = lerp(offsetX, targetX, 0.28); // 더 부드럽게 조정
+    offsetY = lerp(offsetY, targetY, 0.28);
   }
 }
 
