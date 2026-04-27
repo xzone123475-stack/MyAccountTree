@@ -1,11 +1,10 @@
 let rings = [];
-
 let input;
-
 let baseRadius;
 
 const RESET_CODE = "1125";
 const MAX_RINGS = 7;
+const MAX_FONT = 56;
 
 let zoom = 1;
 let offsetX = 0;
@@ -20,10 +19,9 @@ let fontsReady = false;
 let isComposing = false;
 
 // ──────────────────────────────────────────
-// 링 간격 계산: fontSize 기반으로 딱 붙게
+// 링 간격: fontSize 기반으로 딱 붙게
 // ──────────────────────────────────────────
 function getRingGap(ring) {
-  // 폰트 크기 + 약간의 여백(4px)만 확보
   const scaledFont = Number(ring.fontSize ?? 20) * (min(windowWidth, windowHeight) / 800);
   return scaledFont + 4;
 }
@@ -48,13 +46,8 @@ function setup() {
   input = document.getElementById("mainInput");
   fontsReady = fonts.length > 0;
 
-  input.addEventListener("compositionstart", () => {
-    isComposing = true;
-  });
-
-  input.addEventListener("compositionend", () => {
-    isComposing = false;
-  });
+  input.addEventListener("compositionstart", () => { isComposing = true; });
+  input.addEventListener("compositionend", () => { isComposing = false; });
 
   input.addEventListener("keydown", (e) => {
     if (e.key === "Enter") {
@@ -65,7 +58,6 @@ function setup() {
   });
 
   // Firebase: 슬롯 기반(slot0~slot6) 구조로 읽기
-  // 순서는 slotIndex로 정렬
   db.ref("rings").on("value", (snapshot) => {
     const data = snapshot.val();
     rings = new Array(MAX_RINGS).fill(null);
@@ -79,16 +71,13 @@ function setup() {
       });
     }
 
-    // null 슬롯 제거하여 연속 배열로 압축 (순서 유지)
     rings = rings.filter((r) => r !== null);
-
     clampOffsets(true);
   });
 }
 
 // ──────────────────────────────────────────
 // handleInput: 트랜잭션으로 race condition 방지
-// 40명 동시접속 시에도 nextSlot 충돌 없음
 // ──────────────────────────────────────────
 function handleInput(val) {
   if (!val) return;
@@ -97,20 +86,15 @@ function handleInput(val) {
     db.ref("rings").remove();
     db.ref("meta").remove();
   } else {
-    // meta/nextSlot을 트랜잭션으로 원자적 업데이트
-    // 트랜잭션 내부에서 slot을 +1 증가시켜야 race condition 없음
     db.ref("meta/nextSlot").transaction((currentSlot) => {
       const slot = (currentSlot ?? 0) % MAX_RINGS;
-      return (slot + 1) % MAX_RINGS; // 다음 슬롯으로 원자적 전진
+      return (slot + 1) % MAX_RINGS;
     }).then((result) => {
       if (!result.committed) return;
 
-      // 트랜잭션이 저장한 값은 "다음" 슬롯이므로
-      // 현재 쓸 슬롯 = (저장된 값 - 1 + MAX_RINGS) % MAX_RINGS
       const nextSlot = result.snapshot.val();
       const slotIndex = (nextSlot - 1 + MAX_RINGS) % MAX_RINGS;
 
-      // 해당 슬롯에 링 데이터 쓰기 (슬롯 key로 고정)
       const ringData = createRing(val, slotIndex);
       db.ref("rings/slot" + slotIndex).set(ringData);
     });
@@ -158,7 +142,6 @@ function draw() {
     drawTextCircle(ring, currentRadius);
     pop();
 
-    // 간격: fontSize 기반으로 딱 붙게
     currentRadius += getRingGap(ring);
   }
 }
@@ -182,10 +165,9 @@ function createRing(text, slotIndex) {
     b: b,
     speed: sp,
     angleOffset: random(360),
-    fontSize: random(20, 56),
+    fontSize: random(20, MAX_FONT),
     spacingFactor: random(0.72, 1.45),
     wobble: random(-8, 8),
-    // ringGap은 클라이언트에서 getRingGap()으로 계산하므로 저장 안 함
   };
 }
 
@@ -218,14 +200,25 @@ function drawTextCircle(ring, r) {
 }
 
 // ──────────────────────────────────────────
-// 최소 줌: 7개 링 전체가 화면 안에 들어오는 수준
+// 최소 줌: 7링 × 최대 폰트(56) 기준 — 항상 7링 다 들어옴
 // ──────────────────────────────────────────
 function getMinZoom() {
-  const outerR = getOuterRadius(); // zoom=1 기준 외곽 반지름
-  if (outerR <= 0) return 0.3;
-  // 화면 짧은 변의 절반과 비교해 딱 맞는 zoom 계산, 최소 0.15 보장
-  const fitZoom = (min(width, height) * 0.48) / outerR;
-  return max(0.15, fitZoom);
+  const scale = min(windowWidth, windowHeight) / 800;
+  const worstGap = MAX_FONT * scale + 4;
+  const worstOuterR = baseRadius + (MAX_RINGS * worstGap) + 60;
+
+  const fitZoom = (min(width, height) * 0.48) / worstOuterR;
+  return max(0.05, fitZoom);
+}
+
+// ──────────────────────────────────────────
+// 줌: 순수 중앙 기준 (트랙패드 휠 / 핀치 공통)
+// offset 건드리지 않음
+// ──────────────────────────────────────────
+function applyZoomCenter(newZoom) {
+  const minZoom = getMinZoom();
+  zoom = constrain(newZoom, minZoom, 6);
+  clampOffsets(false);
 }
 
 function updateLayout() {
@@ -252,18 +245,23 @@ function getOuterRadius() {
 
 function getMaxOffset() {
   const outerRadius = getOuterRadius() * zoom;
-
   const maxX = max(0, outerRadius - width * 0.22);
   const maxY = max(0, outerRadius - height * 0.22);
-
   return { x: maxX, y: maxY };
 }
 
+// ──────────────────────────────────────────
+// clampOffsets: 줌이 minZoom 근처면 중앙으로 자연스럽게 수렴
+// ──────────────────────────────────────────
 function clampOffsets(instant = false) {
   const limit = getMaxOffset();
+  const minZ = getMinZoom();
+  const pullToCenter = map(zoom, minZ, minZ * 1.15, 1, 0, true);
 
-  const targetX = constrain(offsetX, -limit.x, limit.x);
-  const targetY = constrain(offsetY, -limit.y, limit.y);
+  let targetX = constrain(offsetX, -limit.x, limit.x);
+  let targetY = constrain(offsetY, -limit.y, limit.y);
+  targetX *= (1 - pullToCenter);
+  targetY *= (1 - pullToCenter);
 
   if (instant) {
     offsetX = targetX;
@@ -275,18 +273,8 @@ function clampOffsets(instant = false) {
 }
 
 // ──────────────────────────────────────────
-// 줌: 항상 화면 중앙 기준으로만 동작
+// 모바일: 두 손가락 핀치 = 줌(중앙기준), 한 손가락 = 팬
 // ──────────────────────────────────────────
-function applyZoomCenter(newZoom) {
-  const minZoom = getMinZoom();
-  zoom = constrain(newZoom, minZoom, 6);
-  // zoom 축소 시 offset을 중앙으로 자연스럽게 복귀
-  const centerRatio = map(zoom, minZoom, 1.0, 0.0, 1.0, true);
-  offsetX *= centerRatio;
-  offsetY *= centerRatio;
-  clampOffsets(false);
-}
-
 function touchMoved() {
   if (touches.length === 2) {
     const x1 = touches[0].x;
@@ -298,14 +286,11 @@ function touchMoved() {
 
     if (lastTouchDist !== null) {
       let newZoom = zoom * (d / lastTouchDist);
-      newZoom = constrain(newZoom, getMinZoom(), 6);
       applyZoomCenter(newZoom);
     }
 
     lastTouchDist = d;
-  }
-
-  if (touches.length === 1) {
+  } else if (touches.length === 1) {
     offsetX += movedX;
     offsetY += movedY;
     clampOffsets(false);
@@ -334,8 +319,11 @@ function resetView() {
   offsetY = 0;
 }
 
+// ──────────────────────────────────────────
+// 맥 트랙패드 두 손가락 = 휠 이벤트로 들어옴 → 중앙기준 줌
+// ──────────────────────────────────────────
 function mouseWheel(event) {
   let newZoom = zoom - event.delta * 0.001;
-  newZoom = constrain(newZoom, getMinZoom(), 6);
   applyZoomCenter(newZoom);
+  return false;
 }
