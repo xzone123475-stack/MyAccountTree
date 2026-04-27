@@ -42,11 +42,8 @@ function preload() {
 }
 
 // HTML에서 const db = firebase.database(); 로 선언된 전역을 안전하게 가져온다.
-// const는 window에 안 붙으므로 typeof로 확인.
 function getDB() {
-  try {
-    if (typeof db !== "undefined" && db) return db;
-  } catch (e) {}
+  try { if (typeof db !== "undefined" && db) return db; } catch (e) {}
   if (typeof window !== "undefined" && window.db) return window.db;
   if (typeof firebase !== "undefined" && firebase.database) {
     try { return firebase.database(); } catch (e) {}
@@ -59,9 +56,6 @@ function setup() {
   angleMode(DEGREES);
 
   updateLayout();
-
-  // 슬롯 길이를 항상 MAX_RINGS로 고정 (findIndex가 빈 자리를 찾을 수 있도록)
-  rings = new Array(MAX_RINGS).fill(null);
 
   input = document.getElementById("mainInput");
   fontsReady = fonts.length > 0;
@@ -77,12 +71,12 @@ function setup() {
     }
   });
 
-  // ✅ Firebase 실시간 구독 — 새로고침/다른 디바이스에서도 상태 복원
+  // ✅ Firebase 실시간 구독 — 새로고침/다른 디바이스 동기화
   const database = getDB();
   if (database) {
     database.ref("rings").on("value", (snapshot) => {
-      const data = snapshot.val(); // 객체 또는 null
-      const next = new Array(MAX_RINGS).fill(null);
+      const data = snapshot.val();
+      const next = [];
       if (data) {
         Object.keys(data).forEach((k) => {
           const idx = Number(k);
@@ -91,6 +85,12 @@ function setup() {
           }
         });
       }
+      // 빈 인덱스는 null로 채워서 findIndex가 정확히 동작하게
+      for (let i = 0; i < MAX_RINGS; i++) {
+        if (next[i] === undefined) next[i] = null;
+      }
+      // 끝부분 null 잘라내기 — 원본처럼 rings.length가 자연스럽게 늘어나도록
+      while (next.length > 0 && next[next.length - 1] == null) next.pop();
       rings = next;
     }, (err) => {
       console.error("Firebase read failed:", err);
@@ -137,12 +137,13 @@ function handleInput(val) {
 
   const database = getDB();
 
-  // 🔒 1125만 초기화. 그 외 어떤 경로에서도 rings를 비우지 않음.
+  // 🔒 1125만 초기화
   if (val === RESET_CODE) {
     if (database) {
       database.ref("rings").remove();
+      database.ref("meta/writeCount").set(0);
     } else {
-      rings = new Array(MAX_RINGS).fill(null);
+      rings = [];
     }
     input.value = "";
     return;
@@ -154,15 +155,26 @@ function handleInput(val) {
 
   triggerFlash(r, g, b);
 
-  const nextSlot = rings.findIndex(x => x == null);
-  const slotIndex = (nextSlot >= 0 ? nextSlot : 0);
-  const ringData = createRing(val, slotIndex, r, g, b);
-
   if (database) {
-    // ✅ DB에 저장 → on("value") 콜백이 다시 rings를 갱신
-    database.ref("rings/" + slotIndex).set(ringData);
+    // ✅ 슬롯 순환: 누적 입력 수를 트랜잭션으로 증가 → (count-1) % MAX_RINGS
+    // 이렇게 하면 8번째 = 슬롯 0, 9번째 = 슬롯 1 ... 규칙 보장
+    database.ref("meta/writeCount").transaction(
+      (cur) => (Number(cur) || 0) + 1,
+      (err, committed, snap) => {
+        if (err || !committed || !snap) return;
+        const count = Number(snap.val()) || 1;
+        const slotIndex = (count - 1) % MAX_RINGS;
+        const ringData = createRing(val, slotIndex, r, g, b);
+        database.ref("rings/" + slotIndex).set(ringData);
+      }
+    );
   } else {
-    rings[slotIndex] = ringData; // 오프라인 폴백
+    // 오프라인 폴백
+    const nextSlot = rings.findIndex(x => x == null);
+    const slotIndex = (nextSlot >= 0 && nextSlot < MAX_RINGS)
+      ? nextSlot
+      : (rings.length % MAX_RINGS);
+    rings[slotIndex] = createRing(val, slotIndex, r, g, b);
   }
 
   input.value = "";
@@ -186,7 +198,6 @@ function draw() {
     let sp = Number(ring.speed) || 0.3;
     if (abs(sp) < 0.075) sp = 0.3;
 
-    // 회전: 링별 속도에 따른 모션
     rotate(millis() * 0.02 * sp + Number(ring.angleOffset || 0));
 
     const fontIndex = Number.isInteger(ring.fontIndex)
@@ -197,7 +208,6 @@ function draw() {
       textFont(fonts[fontIndex]);
     }
 
-    // 투명도 제거: 항상 불투명하게 렌더링
     fill(Number(ring.r ?? 160),
          Number(ring.g ?? 160),
          Number(ring.b ?? 160),
@@ -263,9 +273,7 @@ function drawFlash() {
 }
 
 function createRing(text, slotIndex, r, g, b) {
-  // 속도 스펙: 초중반 느리게 시작하는 효과를 주도록 분포설정
   let sp = random(-0.9, 0.9);
-  // 초기 구간에 약간 더 느리게 시작하도록 보정
   if (random() < 0.5) {
     sp *= 0.9;
   }
@@ -319,9 +327,8 @@ function drawTextCircle(ring, r) {
 function getMinZoom() {
   const scale = min(windowWidth, windowHeight) / 800;
   const worstGap = MAX_FONT * scale + 4;
-  const worstOuterR = baseRadius + (MAX_RINGS * worstGap) + 40; // 축소 시 여유 감소
+  const worstOuterR = baseRadius + (MAX_RINGS * worstGap) + 40;
 
-  // 축소 한계 더 타이트하게: 화면 안쪽으로 더 빨리 수렴
   const fitZoom = (min(width, height) * 0.44) / worstOuterR;
   return max(0.05, fitZoom);
 }
@@ -356,7 +363,6 @@ function getOuterRadius() {
 
 function getMaxOffset() {
   const outerRadius = getOuterRadius() * zoom;
-  // 축소 시 화면 경계에 더 촘촘히 붙도록 여백 축소
   const maxX = max(0, outerRadius - width * 0.18);
   const maxY = max(0, outerRadius - height * 0.18);
   return { x: maxX, y: maxY };
@@ -365,7 +371,6 @@ function getMaxOffset() {
 function clampOffsets(instant = false) {
   const limit = getMaxOffset();
   const minZ = getMinZoom();
-  // 뷰를 더 타이트하게 중앙으로 끌고 들어오게 함
   const pullToCenter = map(zoom, minZ, minZ * 1.15, 0.9, 0.0, true);
 
   let targetX = constrain(offsetX, -limit.x, limit.x);
@@ -377,7 +382,6 @@ function clampOffsets(instant = false) {
     offsetX = targetX;
     offsetY = targetY;
   } else {
-    // 부드럽게 더욱 느리게 수렴
     offsetX = lerp(offsetX, targetX, 0.25);
     offsetY = lerp(offsetY, targetY, 0.25);
   }
