@@ -19,11 +19,11 @@ let fontsReady = false;
 
 let isComposing = false;
 
-// 플래시 모션 (전체적으로 더 빠르게)
+// 플래시 모션 (전체적으로 더 빠르게) - 완전 수정: 초기 구간 느리게 시작하도록 구성
 let flash = null;
-const FLASH_EXPAND = 60; // 빠르게 확장
-const FLASH_HOLD = 40;   // 짧게 유지
-const FLASH_SHRINK = 120; // 빠르게 축소
+const FLASH_EXPAND = 80; // 초기 확장 속도 느림
+const FLASH_HOLD = 60;   // 유지 기간 증가
+const FLASH_SHRINK = 180; // 축소 속도 조정
 
 function getRingGap(ring) {
   const scaledFont = Number(ring.fontSize ?? 20) * (min(windowWidth, windowHeight) / 800);
@@ -61,9 +61,10 @@ function setup() {
     }
   });
 
-  // 전체 데이터 바인딩 예: 실제 환경에선 Firebase 초기화 필요
+  // 예시 로컬 데이터 바인딩(실제 환경에선 Firebase/데이터 소스에 연결)
   // db.ref("rings").on("value", (snapshot) => {
-  //   // 데이터를 rings 배열로 매핑
+  //   const data = snapshot.val();
+  //   // 데이터 매핑 로직...
   // });
 }
 
@@ -103,8 +104,8 @@ function handleInput(val) {
   if (!val) return;
 
   if (val === RESET_CODE) {
-    //db.ref("rings").remove();
-    //db.ref("meta").remove();
+    // 로컬 테스트용: 실제 프로덕션에선 DB 초기화 동작 사용 가능
+    rings = rings.map(() => null);
     input.value = "";
     return;
   }
@@ -115,24 +116,12 @@ function handleInput(val) {
 
   triggerFlash(r, g, b);
 
-  //db.ref("meta/nextSlot").transaction((currentSlot) => {
-  //  const slot = (currentSlot ?? 0) % MAX_RINGS;
-  //  return (slot + 1) % MAX_RINGS;
-  //}).then((result) => {
-  //  if (!result.committed) return;
-  //
-  //  const nextSlot = result.snapshot.val();
-  //  const slotIndex = (nextSlot - 1 + MAX_RINGS) % MAX_RINGS;
-  //
-  //  const ringData = createRing(val, slotIndex, r, g, b);
-  //  db.ref("rings/slot" + slotIndex).set(ringData);
-  //});
-  // 간단 로컬 데이터로 예시
+  // 로컬 테스트용: 간단한 슬롯 관리
   const nextSlot = rings.findIndex(r => r == null);
   const slotIndex = (nextSlot >= 0 ? nextSlot : 0);
   const ringData = createRing(val, slotIndex, r, g, b);
   rings[slotIndex] = ringData;
-  // input cleared
+
   input.value = "";
 }
 
@@ -154,6 +143,7 @@ function draw() {
     let sp = Number(ring.speed) || 0.3;
     if (abs(sp) < 0.075) sp = 0.3;
 
+    // 회전: 링별 속도에 따른 모션
     rotate(millis() * 0.02 * sp + Number(ring.angleOffset || 0));
 
     const fontIndex = Number.isInteger(ring.fontIndex)
@@ -164,12 +154,11 @@ function draw() {
       textFont(fonts[fontIndex]);
     }
 
-    fill(
-      Number(ring.r ?? 160),
-      Number(ring.g ?? 160),
-      Number(ring.b ?? 160),
-      255 // 불투명으로 고정
-    );
+    // 투명도 제거: 항상 불투명하게 렌더링
+    fill(Number(ring.r ?? 160),
+         Number(ring.g ?? 160),
+         Number(ring.b ?? 160),
+         255);
     noStroke();
 
     textSize(Number(ring.fontSize ?? 20) * (min(width, height) / 800));
@@ -231,7 +220,12 @@ function drawFlash() {
 }
 
 function createRing(text, slotIndex, r, g, b) {
+  // 속도 스펙: 초중반 느리게 시작하는 효과를 주도록 분포설정
   let sp = random(-0.9, 0.9);
+  // 초기 구간에 약간 더 느리게 시작하도록 보정
+  if (random() < 0.5) {
+    sp *= 0.9;
+  }
   if (abs(sp) < 0.225) {
     sp = sp < 0 ? -0.225 : 0.225;
   }
@@ -282,9 +276,10 @@ function drawTextCircle(ring, r) {
 function getMinZoom() {
   const scale = min(windowWidth, windowHeight) / 800;
   const worstGap = MAX_FONT * scale + 4;
-  const worstOuterR = baseRadius + (MAX_RINGS * worstGap) + 60;
+  const worstOuterR = baseRadius + (MAX_RINGS * worstGap) + 40; // 축소 시 여유 감소
 
-  const fitZoom = (min(width, height) * 0.48) / worstOuterR;
+  // 축소 한계 더 타이트하게: 화면 안쪽으로 더 빨리 수렴
+  const fitZoom = (min(width, height) * 0.44) / worstOuterR;
   return max(0.05, fitZoom);
 }
 
@@ -318,15 +313,17 @@ function getOuterRadius() {
 
 function getMaxOffset() {
   const outerRadius = getOuterRadius() * zoom;
-  const maxX = max(0, outerRadius - width * 0.22);
-  const maxY = max(0, outerRadius - height * 0.22);
+  // 축소 시 화면 경계에 더 촘촘히 붙도록 여백 축소
+  const maxX = max(0, outerRadius - width * 0.18);
+  const maxY = max(0, outerRadius - height * 0.18);
   return { x: maxX, y: maxY };
 }
 
 function clampOffsets(instant = false) {
   const limit = getMaxOffset();
   const minZ = getMinZoom();
-  const pullToCenter = map(zoom, minZ, minZ * 1.15, 1, 0, true);
+  // 뷰를 더 타이트하게 중앙으로 끌고 들어오게 함
+  const pullToCenter = map(zoom, minZ, minZ * 1.15, 0.9, 0.0, true);
 
   let targetX = constrain(offsetX, -limit.x, limit.x);
   let targetY = constrain(offsetY, -limit.y, limit.y);
@@ -337,8 +334,9 @@ function clampOffsets(instant = false) {
     offsetX = targetX;
     offsetY = targetY;
   } else {
-    offsetX = lerp(offsetX, targetX, 0.28); // 더 부드럽게 조정
-    offsetY = lerp(offsetY, targetY, 0.28);
+    // 부드럽게 더욱 느리게 수렴
+    offsetX = lerp(offsetX, targetX, 0.25);
+    offsetY = lerp(offsetY, targetY, 0.25);
   }
 }
 
