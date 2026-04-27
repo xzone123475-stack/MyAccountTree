@@ -47,6 +47,9 @@ function setup() {
 
   updateLayout();
 
+  // 슬롯 길이를 항상 MAX_RINGS로 고정 (findIndex가 빈 자리를 찾을 수 있도록)
+  rings = new Array(MAX_RINGS).fill(null);
+
   input = document.getElementById("mainInput");
   fontsReady = fonts.length > 0;
 
@@ -61,11 +64,27 @@ function setup() {
     }
   });
 
-  // 예시 로컬 데이터 바인딩(실제 환경에선 Firebase/데이터 소스에 연결)
-  // db.ref("rings").on("value", (snapshot) => {
-  //   const data = snapshot.val();
-  //   // 데이터 매핑 로직...
-  // });
+  // ✅ Firebase 실시간 구독 — 새로고침/다른 디바이스에서도 상태 복원
+  // index.html에서 firebase 초기화 후 window.db = firebase.database() 로 노출되어 있어야 함
+  if (window.db) {
+    window.db.ref("rings").on("value", (snapshot) => {
+      const data = snapshot.val(); // 객체 또는 null
+      const next = new Array(MAX_RINGS).fill(null);
+      if (data) {
+        Object.keys(data).forEach((k) => {
+          const idx = Number(k);
+          if (Number.isInteger(idx) && idx >= 0 && idx < MAX_RINGS) {
+            next[idx] = data[k];
+          }
+        });
+      }
+      rings = next;
+    }, (err) => {
+      console.error("Firebase read failed:", err);
+    });
+  } else {
+    console.warn("Firebase not initialized — running in local-only mode.");
+  }
 }
 
 function estimateNextRingRadius() {
@@ -103,9 +122,13 @@ function triggerFlash(r, g, b) {
 function handleInput(val) {
   if (!val) return;
 
+  // 🔒 1125만 초기화. 그 외 어떤 경로에서도 rings를 비우지 않음.
   if (val === RESET_CODE) {
-    // 로컬 테스트용: 실제 프로덕션에선 DB 초기화 동작 사용 가능
-    rings = rings.map(() => null);
+    if (window.db) {
+      window.db.ref("rings").remove();
+    } else {
+      rings = new Array(MAX_RINGS).fill(null);
+    }
     input.value = "";
     return;
   }
@@ -116,11 +139,16 @@ function handleInput(val) {
 
   triggerFlash(r, g, b);
 
-  // 로컬 테스트용: 간단한 슬롯 관리
   const nextSlot = rings.findIndex(r => r == null);
   const slotIndex = (nextSlot >= 0 ? nextSlot : 0);
   const ringData = createRing(val, slotIndex, r, g, b);
-  rings[slotIndex] = ringData;
+
+  if (window.db) {
+    // ✅ DB에 저장 → on("value") 콜백이 다시 rings를 갱신
+    window.db.ref("rings/" + slotIndex).set(ringData);
+  } else {
+    rings[slotIndex] = ringData; // 오프라인 폴백
+  }
 
   input.value = "";
 }
