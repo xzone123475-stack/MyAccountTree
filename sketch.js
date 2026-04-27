@@ -18,6 +18,11 @@ let fontsReady = false;
 
 let isComposing = false;
 
+// 플래시 모션 상태
+let flash = null; // { r,g,b, start, duration }
+const FLASH_DURATION = 900; // ms
+let prevRingsSnapshot = {}; // slotIndex → text 비교용
+
 // ──────────────────────────────────────────
 // 링 간격: fontSize 기반으로 딱 붙게
 // ──────────────────────────────────────────
@@ -62,18 +67,43 @@ function setup() {
     const data = snapshot.val();
     rings = new Array(MAX_RINGS).fill(null);
 
+    const newSnapshot = {};
+
     if (data) {
       Object.values(data).forEach((item) => {
         const idx = Number(item.slotIndex ?? 0);
         if (idx >= 0 && idx < MAX_RINGS) {
           rings[idx] = item;
+          newSnapshot[idx] = item.text;
         }
       });
     }
 
+    // 새로 추가/변경된 링 감지 → 플래시 트리거
+    for (const idx in newSnapshot) {
+      if (prevRingsSnapshot[idx] !== newSnapshot[idx]) {
+        const ring = rings[idx];
+        if (ring) {
+          triggerFlash(ring.r, ring.g, ring.b);
+        }
+        break;
+      }
+    }
+    prevRingsSnapshot = newSnapshot;
+
     rings = rings.filter((r) => r !== null);
     clampOffsets(true);
   });
+}
+
+function triggerFlash(r, g, b) {
+  flash = {
+    r: Number(r ?? 160),
+    g: Number(g ?? 160),
+    b: Number(b ?? 160),
+    start: millis(),
+    duration: FLASH_DURATION,
+  };
 }
 
 // ──────────────────────────────────────────
@@ -106,6 +136,7 @@ function handleInput(val) {
 function draw() {
   background(255);
 
+  push();
   translate(width / 2 + offsetX, height / 2 + offsetY);
   scale(zoom);
 
@@ -118,7 +149,7 @@ function draw() {
     push();
 
     let sp = Number(ring.speed);
-    if (!sp || abs(sp) < 0.05) sp = 0.2;
+    if (!sp || abs(sp) < 0.075) sp = 0.3;
 
     rotate(millis() * 0.02 * sp + Number(ring.angleOffset || 0));
 
@@ -144,12 +175,48 @@ function draw() {
 
     currentRadius += getRingGap(ring);
   }
+  pop();
+
+  // 플래시 오버레이: 화면 전체 → 중앙점으로 수축
+  drawFlash();
+}
+
+// ──────────────────────────────────────────
+// 플래시: 화면을 가득 덮은 컬러 사각형이 중앙으로 수축하며 사라짐
+// ──────────────────────────────────────────
+function drawFlash() {
+  if (!flash) return;
+
+  const elapsed = millis() - flash.start;
+  const t = elapsed / flash.duration;
+
+  if (t >= 1) {
+    flash = null;
+    return;
+  }
+
+  // ease-in-cubic: 처음엔 천천히 줄다가 끝에서 빠르게 사라짐
+  const eased = t * t * t;
+  const scaleFactor = 1 - eased;
+  const alpha = 255 * (1 - t * 0.3); // 끝까지 진하게 유지하다 살짝만 흐려짐
+
+  const w = width * scaleFactor;
+  const h = height * scaleFactor;
+
+  push();
+  resetMatrix();
+  noStroke();
+  fill(flash.r, flash.g, flash.b, alpha);
+  rectMode(CENTER);
+  rect(width / 2, height / 2, w, h);
+  pop();
 }
 
 function createRing(text, slotIndex) {
-  let sp = random(-0.6, 0.6);
-  if (abs(sp) < 0.15) {
-    sp = sp < 0 ? -0.15 : 0.15;
+  // 속도 다양성 1.5배 (기존 ±0.6 → ±0.9, 최소 0.15 → 0.225)
+  let sp = random(-0.9, 0.9);
+  if (abs(sp) < 0.225) {
+    sp = sp < 0 ? -0.225 : 0.225;
   }
 
   const r = floor(random(80, 220));
@@ -212,8 +279,7 @@ function getMinZoom() {
 }
 
 // ──────────────────────────────────────────
-// 줌: 순수 중앙 기준 (트랙패드 휠 / 핀치 공통)
-// offset 건드리지 않음
+// 줌: 순수 중앙 기준
 // ──────────────────────────────────────────
 function applyZoomCenter(newZoom) {
   const minZoom = getMinZoom();
@@ -250,9 +316,6 @@ function getMaxOffset() {
   return { x: maxX, y: maxY };
 }
 
-// ──────────────────────────────────────────
-// clampOffsets: 줌이 minZoom 근처면 중앙으로 자연스럽게 수렴
-// ──────────────────────────────────────────
 function clampOffsets(instant = false) {
   const limit = getMaxOffset();
   const minZ = getMinZoom();
@@ -272,9 +335,6 @@ function clampOffsets(instant = false) {
   }
 }
 
-// ──────────────────────────────────────────
-// 모바일: 두 손가락 핀치 = 줌(중앙기준), 한 손가락 = 팬
-// ──────────────────────────────────────────
 function touchMoved() {
   if (touches.length === 2) {
     const x1 = touches[0].x;
@@ -319,9 +379,6 @@ function resetView() {
   offsetY = 0;
 }
 
-// ──────────────────────────────────────────
-// 맥 트랙패드 두 손가락 = 휠 이벤트로 들어옴 → 중앙기준 줌
-// ──────────────────────────────────────────
 function mouseWheel(event) {
   let newZoom = zoom - event.delta * 0.001;
   applyZoomCenter(newZoom);
