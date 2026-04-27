@@ -18,9 +18,11 @@ let fontsReady = false;
 
 let isComposing = false;
 
-// 플래시 모션 상태 (입력자 본인 한정)
+// 플래시 모션
 let flash = null;
-const FLASH_DURATION = 900;
+const FLASH_EXPAND = 220;   // ms - 시작링 → 전체화면
+const FLASH_HOLD = 120;     // ms - 전체 덮은 채 대기
+const FLASH_SHRINK = 380;   // ms - 전체화면 → 중앙점
 
 function getRingGap(ring) {
   const scaledFont = Number(ring.fontSize ?? 20) * (min(windowWidth, windowHeight) / 800);
@@ -58,7 +60,6 @@ function setup() {
     }
   });
 
-  // Firebase: 다른 사용자 변경에는 플래시 안 띄움
   db.ref("rings").on("value", (snapshot) => {
     const data = snapshot.val();
     rings = new Array(MAX_RINGS).fill(null);
@@ -77,13 +78,41 @@ function setup() {
   });
 }
 
+// ──────────────────────────────────────────
+// 새 링이 그려질 반지름(화면 좌표 기준) 추정
+// 현재 링들 + 평균 gap 하나 더 = 곧 들어올 자리
+// ──────────────────────────────────────────
+function estimateNextRingRadius() {
+  let r = baseRadius;
+  for (let i = 0; i < rings.length; i++) {
+    if (rings[i]) r += getRingGap(rings[i]);
+  }
+  // 화면에 보이는 크기로 변환 (zoom 적용)
+  return r * zoom;
+}
+
 function triggerFlash(r, g, b) {
+  const startR = estimateNextRingRadius();
+  // 화면 모서리까지 거리(중앙 기준)
+  const cx = width / 2 + offsetX;
+  const cy = height / 2 + offsetY;
+  const corners = [
+    dist(cx, cy, 0, 0),
+    dist(cx, cy, width, 0),
+    dist(cx, cy, 0, height),
+    dist(cx, cy, width, height),
+  ];
+  const maxR = max(corners) + 20;
+
   flash = {
     r: Number(r ?? 160),
     g: Number(g ?? 160),
     b: Number(b ?? 160),
+    cx: cx,
+    cy: cy,
+    startR: startR,
+    maxR: maxR,
     start: millis(),
-    duration: FLASH_DURATION,
   };
 }
 
@@ -97,7 +126,6 @@ function handleInput(val) {
     return;
   }
 
-  // 본인 디바이스에서만 플래시
   const r = floor(random(80, 220));
   const g = floor(random(80, 220));
   const b = floor(random(80, 220));
@@ -167,29 +195,55 @@ function draw() {
   drawFlash();
 }
 
+// ──────────────────────────────────────────
+// Bouncy easing (탱탱볼 느낌)
+// easeOutBack: 약간 오버슈트 후 정착
+// easeInBack:  살짝 뒤로 당겼다가 빠르게 사라짐
+// ──────────────────────────────────────────
+function easeOutBack(t) {
+  const s = 1.70158;
+  const u = t - 1;
+  return u * u * ((s + 1) * u + s) + 1;
+}
+function easeInBack(t) {
+  const s = 1.70158;
+  return t * t * ((s + 1) * t - s);
+}
+
 function drawFlash() {
   if (!flash) return;
 
   const elapsed = millis() - flash.start;
-  const t = constrain(elapsed / flash.duration, 0, 1);
+  const total = FLASH_EXPAND + FLASH_HOLD + FLASH_SHRINK;
 
-  if (t >= 1) {
+  if (elapsed >= total) {
     flash = null;
     return;
   }
 
-  const eased = t * t * t;
-  const scaleFactor = 1 - eased;
+  let radius;
+  if (elapsed < FLASH_EXPAND) {
+    // Phase 1: 링 위치/크기 → 화면 전체 (탱탱볼처럼 살짝 오버슈트)
+    const t = elapsed / FLASH_EXPAND;
+    const e = easeOutBack(t);
+    radius = lerp(flash.startR, flash.maxR, e);
+  } else if (elapsed < FLASH_EXPAND + FLASH_HOLD) {
+    // Phase 2: 잠깐 대기
+    radius = flash.maxR;
+  } else {
+    // Phase 3: 중앙점으로 수축 (튕기듯 빠르게)
+    const t = (elapsed - FLASH_EXPAND - FLASH_HOLD) / FLASH_SHRINK;
+    const e = easeInBack(t);
+    radius = lerp(flash.maxR, 0, e);
+  }
 
-  const w = width * scaleFactor;
-  const h = height * scaleFactor;
+  if (radius <= 0) return;
 
   push();
   resetMatrix();
   noStroke();
-  fill(flash.r, flash.g, flash.b, 255);
-  rectMode(CENTER);
-  rect(width / 2, height / 2, w, h);
+  fill(flash.r, flash.g, flash.b);
+  ellipse(flash.cx, flash.cy, radius * 2, radius * 2);
   pop();
 }
 
