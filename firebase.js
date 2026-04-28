@@ -1,8 +1,8 @@
 const firebaseConfig = {
-  apiKey: "AIzaSyACilghlkINXVVVR2BntW34gNccEl0SivY",
-  authDomain: "myaccounttree.firebaseapp.com",
-  databaseURL: "https://myaccounttree-default-rtdb.firebaseio.com",
-  projectId: "myaccounttree",
+  apiKey: "AIzaSyBWraRTJ_7lQkZQFOr-p1GhkONjnPEHqW0",
+  authDomain: "accounttree.firebaseapp.com",
+  databaseURL: "https://accounttree-default-rtdb.firebaseio.com",
+  projectId: "accounttree",
 };
 
 firebase.initializeApp(firebaseConfig);
