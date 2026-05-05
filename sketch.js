@@ -334,8 +334,19 @@ function getMinZoom() {
 function applyZoomCenter(newZoom) {
   const minZoom = getMinZoom();
   zoom = constrain(newZoom, minZoom, 6);
-  clampOffsets(false);
+
+  const hasTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+  const isNarrow = min(windowWidth, windowHeight) < MOBILE_BREAKPOINT;
+  const isMobile = hasTouch || isNarrow;
+
+  if (isMobile) {
+    offsetX = 0;
+    offsetY = 0;
+  } else {
+    clampOffsets(false);
+  }
 }
+
 
 function updateLayout() {
   const base = min(windowWidth, windowHeight);
