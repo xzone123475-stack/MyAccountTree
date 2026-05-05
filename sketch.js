@@ -187,7 +187,7 @@ function handleInput(val) {
 }
 
 function draw() {
-  background(255);
+  clear();
 
   push();
   translate(width / 2 + offsetX, height / 2 + offsetY);
