@@ -7,10 +7,13 @@ const RESET_CODE = "1125";
 const MAX_RINGS = 7;
 const MAX_FONT = 56;
 
-const INITIAL_ZOOM = 3.5;
-const FIXED_MIN_ZOOM = 3;
+const DESKTOP_INITIAL_ZOOM = 3.5;
+const DESKTOP_MIN_ZOOM = 3;
 
-let zoom = INITIAL_ZOOM;
+const MOBILE_INITIAL_ZOOM = 2.5;
+const MOBILE_MIN_ZOOM = 2;
+
+let zoom = 1;
 let offsetX = 0;
 let offsetY = 0;
 
