@@ -7,8 +7,8 @@ const RESET_CODE = "1125";
 const MAX_RINGS = 7;
 const MAX_FONT = 56;
 
-const INITIAL_ZOOM = 2;
-const FIXED_MIN_ZOOM = 1.5;
+const INITIAL_ZOOM = 4;
+const FIXED_MIN_ZOOM = 3.5;
 
 let zoom = INITIAL_ZOOM;
 let offsetX = 0;
