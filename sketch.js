@@ -389,7 +389,13 @@ function clampOffsets(instant = false) {
   }
 }
 
+
 function touchMoved() {
+  // 모바일 판별
+  const hasTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+  const isNarrow = min(windowWidth, windowHeight) < MOBILE_BREAKPOINT;
+  const isMobile = hasTouch || isNarrow;
+
   if (touches.length === 2) {
     const x1 = touches[0].x;
     const y1 = touches[0].y;
@@ -404,14 +410,21 @@ function touchMoved() {
     }
 
     lastTouchDist = d;
-  } else if (touches.length === 1) {
+
+    // 핀치 중에는 항상 중앙 고정
+    offsetX = 0;
+    offsetY = 0;
+  } else if (touches.length === 1 && !isMobile) {
+    // 데스크탑(터치 노트북 등)에서만 패닝 허용
     offsetX += movedX;
     offsetY += movedY;
     clampOffsets(false);
   }
+  // 모바일 단일 터치는 무시 → 튐 현상 제거
 
   return false;
 }
+
 
 function touchStarted() {
   const now = millis();
