@@ -8,18 +8,24 @@
   />
 
   <style>
-    html, body {
-  margin: 0;
-  padding: 0;
-  min-height: 100vh;
+html {
   background: radial-gradient(
     circle at center,
     #ffffff 0%,
-    #ffffff 25vmin,
+    #ffffff 20vmin,
     #C1E83F 55vmin,
     #C1E83F 100%
-  );
-  background-attachment: fixed;
+  ) fixed;
+  min-height: 100vh;
+}
+body {
+  margin: 0;
+  padding: 0;
+  background: transparent;
+}
+canvas {
+  background: transparent !important;
+  display: block;
 }
 
     @font-face {
