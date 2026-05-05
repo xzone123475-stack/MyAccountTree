@@ -7,7 +7,10 @@ const RESET_CODE = "1125";
 const MAX_RINGS = 7;
 const MAX_FONT = 56;
 
-let zoom = 1;
+const INITIAL_ZOOM = 2;
+const FIXED_MIN_ZOOM = 1.5;
+
+let zoom = INITIAL_ZOOM;
 let offsetX = 0;
 let offsetY = 0;
 
@@ -56,6 +59,10 @@ function setup() {
   angleMode(DEGREES);
 
   updateLayout();
+
+  zoom = INITIAL_ZOOM;
+  offsetX = 0;
+  offsetY = 0;
 
   input = document.getElementById("mainInput");
   fontsReady = fonts.length > 0;
@@ -325,12 +332,7 @@ function drawTextCircle(ring, r) {
 }
 
 function getMinZoom() {
-  const scale = min(windowWidth, windowHeight) / 800;
-  const worstGap = MAX_FONT * scale + 4;
-  const worstOuterR = baseRadius + (MAX_RINGS * worstGap) + 40;
-
-  const fitZoom = (min(width, height) * 0.44) / worstOuterR;
-  return max(0.05, fitZoom);
+  return FIXED_MIN_ZOOM;
 }
 
 function applyZoomCenter(newZoom) {
@@ -426,7 +428,7 @@ function touchEnded() {
 }
 
 function resetView() {
-  zoom = 1;
+  zoom = INITIAL_ZOOM;
   offsetX = 0;
   offsetY = 0;
 }
