@@ -7,11 +7,16 @@ const RESET_CODE = "1125";
 const MAX_RINGS = 7;
 const MAX_FONT = 56;
 
-const DESKTOP_INITIAL_ZOOM = 3;
-const DESKTOP_MIN_ZOOM = 2;
+const DESKTOP_INITIAL_ZOOM = 2;
+const DESKTOP_MIN_ZOOM = 1.3;
 
-const MOBILE_INITIAL_ZOOM = 2;
-const MOBILE_MIN_ZOOM = 1;
+const MOBILE_INITIAL_ZOOM = 1.2;
+const MOBILE_MIN_ZOOM = 0.7;
+
+const MOBILE_BREAKPOINT = 768;
+
+let INITIAL_ZOOM = DESKTOP_INITIAL_ZOOM;
+let FIXED_MIN_ZOOM = DESKTOP_MIN_ZOOM;
 
 let zoom = 1;
 let offsetX = 0;
@@ -25,11 +30,10 @@ let fontsReady = false;
 
 let isComposing = false;
 
-// 플래시 모션 (전체적으로 더 빠르게) - 완전 수정: 초기 구간 느리게 시작하도록 구성
 let flash = null;
-const FLASH_EXPAND = 80; // 초기 확장 속도 느림
-const FLASH_HOLD = 60;   // 유지 기간 증가
-const FLASH_SHRINK = 180; // 축소 속도 조정
+const FLASH_EXPAND = 80;
+const FLASH_HOLD = 60;
+const FLASH_SHRINK = 180;
 
 function getRingGap(ring) {
   const scaledFont = Number(ring.fontSize ?? 20) * (min(windowWidth, windowHeight) / 800);
@@ -47,7 +51,6 @@ function preload() {
   ];
 }
 
-// HTML에서 const db = firebase.database(); 로 선언된 전역을 안전하게 가져온다.
 function getDB() {
   try { if (typeof db !== "undefined" && db) return db; } catch (e) {}
   if (typeof window !== "undefined" && window.db) return window.db;
@@ -81,7 +84,6 @@ function setup() {
     }
   });
 
-  // ✅ Firebase 실시간 구독 — 새로고침/다른 디바이스 동기화
   const database = getDB();
   if (database) {
     database.ref("rings").on("value", (snapshot) => {
@@ -95,11 +97,9 @@ function setup() {
           }
         });
       }
-      // 빈 인덱스는 null로 채워서 findIndex가 정확히 동작하게
       for (let i = 0; i < MAX_RINGS; i++) {
         if (next[i] === undefined) next[i] = null;
       }
-      // 끝부분 null 잘라내기 — 원본처럼 rings.length가 자연스럽게 늘어나도록
       while (next.length > 0 && next[next.length - 1] == null) next.pop();
       rings = next;
     }, (err) => {
@@ -147,7 +147,6 @@ function handleInput(val) {
 
   const database = getDB();
 
-  // 🔒 1125만 초기화
   if (val === RESET_CODE) {
     if (database) {
       database.ref("rings").remove();
@@ -166,8 +165,6 @@ function handleInput(val) {
   triggerFlash(r, g, b);
 
   if (database) {
-    // ✅ 슬롯 순환: 누적 입력 수를 트랜잭션으로 증가 → (count-1) % MAX_RINGS
-    // 이렇게 하면 8번째 = 슬롯 0, 9번째 = 슬롯 1 ... 규칙 보장
     database.ref("meta/writeCount").transaction(
       (cur) => (Number(cur) || 0) + 1,
       (err, committed, snap) => {
@@ -179,7 +176,6 @@ function handleInput(val) {
       }
     );
   } else {
-    // 오프라인 폴백
     const nextSlot = rings.findIndex(x => x == null);
     const slotIndex = (nextSlot >= 0 && nextSlot < MAX_RINGS)
       ? nextSlot
@@ -236,9 +232,6 @@ function draw() {
   drawFlash();
 }
 
-// ──────────────────────────────────────────
-// Bouncy easing — 탱탱볼 느낌
-// ──────────────────────────────────────────
 function easeOutBack(t) {
   const s = 2.2;
   const u = t - 1;
@@ -347,6 +340,10 @@ function applyZoomCenter(newZoom) {
 function updateLayout() {
   const base = min(windowWidth, windowHeight);
   baseRadius = base * 0.12;
+
+  const isMobile = windowWidth < MOBILE_BREAKPOINT;
+  INITIAL_ZOOM   = isMobile ? MOBILE_INITIAL_ZOOM : DESKTOP_INITIAL_ZOOM;
+  FIXED_MIN_ZOOM = isMobile ? MOBILE_MIN_ZOOM     : DESKTOP_MIN_ZOOM;
 }
 
 function windowResized() {
