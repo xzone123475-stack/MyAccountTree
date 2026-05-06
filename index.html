@@ -22,33 +22,27 @@
       overflow: hidden;
       overscroll-behavior: none;
       -webkit-text-size-adjust: 100%;
-      background: transparent;
     }
 
-    body {
-      position: fixed;
-      inset: 0;
-    }
-
-    /* 🔥 배경을 별도 레이어로 고정 */
-    #bgLayer {
-      position: fixed;
-      inset: 0;
-      z-index: 0;
-      pointer-events: none;
+    html {
       background: radial-gradient(
         circle at center,
         #ffffff 0%,
         #ffffff 5vmin,
         #C1E83F 15vmin,
         #C1E83F 100%
-      );
+      ) fixed;
+      min-height: 100vh;
+    }
+
+    body {
+      position: fixed;
+      inset: 0;
+      background: transparent;
     }
 
     canvas {
       display: block;
-      position: relative;
-      z-index: 1;
       background: transparent !important;
       touch-action: none;
     }
@@ -91,8 +85,6 @@
   </style>
 </head>
 <body>
-  <div id="bgLayer"></div>
-
   <form id="inputForm" action="javascript:void(0);">
     <input
       id="mainInput"
