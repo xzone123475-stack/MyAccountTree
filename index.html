@@ -8,26 +8,6 @@
   />
 
   <style>
-html {
-  background: radial-gradient(
-    circle at center,
-    #ffffff 0%,
-    #ffffff 5vmin,
-    #C1E83F 15vmin,
-    #C1E83F 100%
-  ) fixed;
-  min-height: 100vh;
-}
-body {
-  margin: 0;
-  padding: 0;
-  background: transparent;
-}
-canvas {
-  background: transparent !important;
-  display: block;
-}
-
     @font-face {
       font-family: "SunflowerLocal";
       src: url("fonts/Sunflower-Medium.ttf") format("truetype");
@@ -40,18 +20,30 @@ canvas {
       width: 100%;
       height: 100%;
       overflow: hidden;
-      background: #fff;
       overscroll-behavior: none;
       -webkit-text-size-adjust: 100%;
+    }
+
+    html {
+      background: radial-gradient(
+        circle at center,
+        #ffffff 0%,
+        #ffffff 5vmin,
+        #C1E83F 15vmin,
+        #C1E83F 100%
+      ) fixed;
+      min-height: 100vh;
     }
 
     body {
       position: fixed;
       inset: 0;
+      background: transparent;
     }
 
     canvas {
       display: block;
+      background: transparent !important;
       touch-action: none;
     }
 
